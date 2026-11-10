@@ -324,29 +324,46 @@ def test_fk_prismatic_descendant_linear_velocity_matches_finite_difference(test,
 
 
 def test_ik_prismatic_descendant_recovers_joint_state(test, device):
+    """``eval_ik`` recovers joint state of a prismatic child and of a D6 child with linear X+Y axes
+    below a rotating, offset-COM parent."""
+    cfg = newton.ModelBuilder.JointDofConfig.create_unlimited
     builder = newton.ModelBuilder(gravity=(0.0, 0.0, 0.0), up_axis=newton.Axis.Y)
 
-    base = builder.add_link()
-    slider = builder.add_link()
+    parent_xform = wp.transform(wp.vec3(1.0, 0.0, 0.4), wp.quat_identity())
+    child_xform = wp.transform(wp.vec3(0.2, 0.0, -0.15), wp.quat_identity())
 
-    builder.body_com[base] = wp.vec3(0.2, 0.0, 0.0)
-    builder.body_com[slider] = wp.vec3(0.35, 0.0, -0.1)
+    # Articulation 0: revolute -> prismatic X. Articulation 1: revolute -> D6 with linear X+Y.
+    for child_joint in ("prismatic", "d6"):
+        base = builder.add_link()
+        slider = builder.add_link()
 
-    j0 = builder.add_joint_revolute(
-        parent=-1,
-        child=base,
-        axis=newton.Axis.Z,
-        parent_xform=wp.transform(wp.vec3(0.0, 0.0, 0.0), wp.quat_identity()),
-        child_xform=wp.transform(wp.vec3(0.0, 0.0, 0.0), wp.quat_identity()),
-    )
-    j1 = builder.add_joint_prismatic(
-        parent=base,
-        child=slider,
-        axis=newton.Axis.X,
-        parent_xform=wp.transform(wp.vec3(1.0, 0.0, 0.4), wp.quat_identity()),
-        child_xform=wp.transform(wp.vec3(0.2, 0.0, -0.15), wp.quat_identity()),
-    )
-    builder.add_articulation([j0, j1])
+        builder.body_com[base] = wp.vec3(0.2, 0.0, 0.0)
+        builder.body_com[slider] = wp.vec3(0.35, 0.0, -0.1)
+
+        j0 = builder.add_joint_revolute(
+            parent=-1,
+            child=base,
+            axis=newton.Axis.Z,
+            parent_xform=wp.transform(wp.vec3(0.0, 0.0, 0.0), wp.quat_identity()),
+            child_xform=wp.transform(wp.vec3(0.0, 0.0, 0.0), wp.quat_identity()),
+        )
+        if child_joint == "prismatic":
+            j1 = builder.add_joint_prismatic(
+                parent=base,
+                child=slider,
+                axis=newton.Axis.X,
+                parent_xform=parent_xform,
+                child_xform=child_xform,
+            )
+        else:
+            j1 = builder.add_joint_d6(
+                parent=base,
+                child=slider,
+                linear_axes=[cfg(axis=newton.Axis.X), cfg(axis=newton.Axis.Y)],
+                parent_xform=parent_xform,
+                child_xform=child_xform,
+            )
+        builder.add_articulation([j0, j1])
 
     model = builder.finalize(device=device)
 
@@ -357,10 +374,16 @@ def test_ik_prismatic_descendant_recovers_joint_state(test, device):
     q = state.joint_q.numpy()
     qd = state.joint_qd.numpy()
 
+    # prismatic articulation (joints 0, 1)
     q[q_start[0]] = 0.55
     q[q_start[1]] = 0.8
     qd[qd_start[0]] = 1.1
     qd[qd_start[1]] = -0.35
+    # D6 articulation (joints 2, 3)
+    q[q_start[2]] = 0.55
+    q[q_start[3] : q_start[3] + 2] = (0.8, -0.3)
+    qd[qd_start[2]] = 1.1
+    qd[qd_start[3] : qd_start[3] + 2] = (-0.35, 0.6)
 
     state.joint_q.assign(q)
     state.joint_qd.assign(qd)
