@@ -2966,6 +2966,54 @@ class TestModelJoints(unittest.TestCase):
         assert builder2.articulation_count == 2 * builder.articulation_count
         assert builder2.articulation_start == [0, 1, 2, 3]
 
+    def test_collapse_fixed_joints_merges_inertia_about_merged_com(self):
+        # (mass, COM, inertia about the COM) of the root link and two fixed children merged in series
+        masses = [7.0, 11.0, 3.0]
+        coms = [np.array([0.30, 0.05, -0.10]), np.array([0.20, -0.04, 0.15]), np.array([-0.10, 0.12, 0.05])]
+        inertias = [np.diag([0.8, 1.1, 0.9]), np.diag([0.5, 0.7, 0.4]), np.diag([0.2, 0.3, 0.6])]
+        # pose of each child's frame in its parent's frame
+        offsets = [np.array([0.90, 0.10, -0.40]), np.array([-0.30, 0.50, 0.20])]
+        quats = [
+            wp.quat_from_axis_angle(wp.vec3(0.0, 1.0, 0.0), 0.6),
+            wp.quat_from_axis_angle(wp.vec3(1.0, 0.0, 0.0), -0.9),
+        ]
+
+        builder = ModelBuilder()
+        links = [builder.add_link(mass=masses[0], com=wp.vec3(*coms[0]), inertia=wp.mat33(*inertias[0].flatten()))]
+        joints = [builder.add_joint_revolute(-1, links[0], axis=(0.0, 1.0, 0.0))]
+        for i in range(2):
+            xform = wp.transform(wp.vec3(*offsets[i]), quats[i])
+            child = builder.add_link(
+                mass=masses[i + 1], com=wp.vec3(*coms[i + 1]), inertia=wp.mat33(*inertias[i + 1].flatten())
+            )
+            joints.append(builder.add_joint_fixed(links[-1], child, parent_xform=xform))
+            links.append(child)
+        builder.add_articulation(joints)
+        builder.collapse_fixed_joints()
+
+        # express every link in the root link's frame and compose the exact inertia about the merged COM
+        rot = np.eye(3)
+        pos = np.zeros(3)
+        com_list = [coms[0]]
+        rot_list = [np.eye(3)]
+        for i in range(2):
+            pos = pos + rot @ offsets[i]
+            rot = rot @ np.array(wp.quat_to_matrix(quats[i])).reshape(3, 3)
+            com_list.append(pos + rot @ coms[i + 1])
+            rot_list.append(rot)
+        com = sum(m * c for m, c in zip(masses, com_list, strict=True)) / sum(masses)
+
+        def steiner(m, d):
+            return m * (d @ d * np.eye(3) - np.outer(d, d))
+
+        expected = sum(
+            r @ inertia @ r.T + steiner(m, c - com)
+            for m, c, inertia, r in zip(masses, com_list, inertias, rot_list, strict=True)
+        )
+        self.assertAlmostEqual(builder.body_mass[0], sum(masses), places=5)
+        assert_np_equal(np.array(builder.body_com[0]), com, tol=1e-6)
+        assert_np_equal(np.array(builder.body_inertia[0]).reshape(3, 3), expected, tol=1e-5)
+
     def test_collapse_fixed_joints_transports_body_velocity(self):
         for joint_type in (newton.JointType.FREE, newton.JointType.DISTANCE):
             with self.subTest(joint_type=joint_type):
