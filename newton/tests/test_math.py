@@ -28,6 +28,13 @@ def _inside_limits_kernel(
     result[i] = newton.math.vec_inside_limits(a[i], lower[i], upper[i])
 
 
+@wp.kernel(enable_backward=False)
+def _boltzmann_kernel(a: wp.array[float], b: wp.array[float], alpha: wp.array[float], result: wp.array[float]):
+    """Evaluate the Boltzmann-weighted average on a Warp device."""
+    i = wp.tid()
+    result[i] = newton.math.boltzmann(a[i], b[i], alpha[i])
+
+
 class TestMathVectorPredicates(unittest.TestCase):
     """Check finite boundaries and unordered values in vector predicates."""
 
@@ -119,6 +126,34 @@ class TestMathVectorPredicates(unittest.TestCase):
                     device=device,
                 )
                 np.testing.assert_array_equal(result.numpy(), expected)
+
+
+class TestMathBoltzmann(unittest.TestCase):
+    """Check the Boltzmann-weighted average against a closed-form reference."""
+
+    def test_boltzmann_large_exponents(self):
+        """Match the float64 reference when ``alpha * value`` is large enough to overflow or underflow ``exp``."""
+        a = np.array([0.0, 1.0, 10.0, 100.0, -100.0, 50.0, -3.0, 20.0], dtype=np.float32)
+        b = np.array([0.0, 2.0, 9.0, 99.0, -101.0, 50.0, -2.0, -20.0], dtype=np.float32)
+        alpha = np.array([1.0, 1.0, 10.0, 1.0, 5.0, 100.0, -10.0, 8.0], dtype=np.float32)
+        a64, b64, alpha64 = (x.astype(np.float64) for x in (a, b, alpha))
+        expected = b64 + (a64 - b64) / (1.0 + np.exp(alpha64 * (b64 - a64)))
+
+        for device in get_test_devices(mode="basic"):
+            with self.subTest(device=device):
+                result = wp.empty(len(a), dtype=float, device=device)
+                wp.launch(
+                    _boltzmann_kernel,
+                    dim=len(a),
+                    inputs=[
+                        wp.array(a, dtype=float, device=device),
+                        wp.array(b, dtype=float, device=device),
+                        wp.array(alpha, dtype=float, device=device),
+                    ],
+                    outputs=[result],
+                    device=device,
+                )
+                np.testing.assert_allclose(result.numpy(), expected, rtol=1e-5, atol=1e-6)
 
 
 if __name__ == "__main__":

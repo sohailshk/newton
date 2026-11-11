@@ -33,8 +33,11 @@ def boltzmann(a: float, b: float, alpha: float):
     Returns:
         float: The Boltzmann-weighted average of `a` and `b`.
     """
-    e1 = wp.exp(alpha * a)
-    e2 = wp.exp(alpha * b)
+    # Shift the exponents by their maximum so that large ``alpha * a`` cannot overflow.
+    # The shift cancels in the quotient.
+    shift = wp.max(alpha * a, alpha * b)
+    e1 = wp.exp(alpha * a - shift)
+    e2 = wp.exp(alpha * b - shift)
     return (a * e1 + b * e2) / (e1 + e2)
 
 
