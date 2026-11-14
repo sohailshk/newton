@@ -149,6 +149,11 @@ def _convex_hull_interior_point(vertices: np.ndarray, indices: np.ndarray | None
     return mean + (volumes[:, None] * tris.sum(axis=1)).sum(axis=0) / (4.0 * total)
 
 
+def _as_vec3(value: Vec3) -> wp.vec3:
+    """Return ``value`` as a ``wp.vec3``, skipping the conversion if it already is one."""
+    return value if isinstance(value, wp.vec3) else wp.vec3(*value)
+
+
 def _validate_opacity(value: Any, value_name: str) -> float:
     """Return a finite display opacity in [0, 1]."""
     opacity = float(value)
@@ -11981,9 +11986,9 @@ class ModelBuilder:
         resolved_opacity = _validate_opacity(1.0 if opacity is None else opacity, "Triangle opacity")
 
         # compute basis for 2D rest pose
-        p = wp.vec3(*self.particle_q[i])
-        q = wp.vec3(*self.particle_q[j])
-        r = wp.vec3(*self.particle_q[k])
+        p = _as_vec3(self.particle_q[i])
+        q = _as_vec3(self.particle_q[j])
+        r = _as_vec3(self.particle_q[k])
 
         qp = q - p
         rp = r - p
@@ -12247,13 +12252,13 @@ class ModelBuilder:
         edge_kd = edge_kd if edge_kd is not None else self.default_edge_kd
 
         # compute rest angle
-        x3 = wp.vec3(*self.particle_q[k])
-        x4 = wp.vec3(*self.particle_q[l])
+        x3 = _as_vec3(self.particle_q[k])
+        x4 = _as_vec3(self.particle_q[l])
         if rest is None:
             rest = 0.0
             if i != -1 and j != -1:
-                x1 = wp.vec3(*self.particle_q[i])
-                x2 = wp.vec3(*self.particle_q[j])
+                x1 = _as_vec3(self.particle_q[i])
+                x2 = _as_vec3(self.particle_q[j])
 
                 n1 = wp.normalize(wp.cross(x3 - x1, x4 - x1))
                 n2 = wp.normalize(wp.cross(x4 - x2, x3 - x2))
@@ -12903,7 +12908,7 @@ class ModelBuilder:
         start_tet = self.tet_count
 
         mass = cell_x * cell_y * cell_z * density
-        pos = wp.vec3(*pos)
+        pos = _as_vec3(pos)
         rot = wp.quat(*rot)
 
         for z in range(dim_z + 1):
